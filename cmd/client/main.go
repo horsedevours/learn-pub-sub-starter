@@ -27,12 +27,29 @@ func main() {
 		log.Fatalf("error with user login: %s", err)
 	}
 
-	_, _, err = pubsub.DeclareAndBind(conn, routing.ExchangePerilDirect, fmt.Sprintf("%s.%s", routing.PauseKey, user), routing.PauseKey, int(pubsub.Transient))
+	channel, _, err := pubsub.DeclareAndBind(conn, routing.ExchangePerilDirect, fmt.Sprintf("%s.%s", routing.PauseKey, user), routing.PauseKey, pubsub.Transient)
 	if err != nil {
 		log.Fatalf("error binding queue: %s", err)
 	}
 
 	gameState := gamelogic.NewGameState(user)
+
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilDirect, fmt.Sprintf("%s.%s", routing.PauseKey, user), routing.PauseKey, pubsub.Transient, handlerPause(gameState))
+	if err != nil {
+		log.Fatalln("error subscribing to pause handler: ", err)
+	}
+
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, fmt.Sprintf("%s.%s", routing.ArmyMovesPrefix, user), fmt.Sprintf("%s.*", routing.ArmyMovesPrefix),
+		pubsub.Transient, handlerArmyMove(channel, gameState))
+	if err != nil {
+		log.Fatalln("error subscribing to army moves handler: ", err)
+	}
+
+	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix),
+		pubsub.Durable, handlerWarMoves(gameState))
+	if err != nil {
+		log.Fatalln("error subscribing to army moves handler: ", err)
+	}
 
 	for !conn.IsClosed() {
 		words := gamelogic.GetInput()
@@ -45,11 +62,15 @@ func main() {
 			continue
 		}
 		if words[0] == "move" {
-			_, err := gameState.CommandMove(words)
+			mv, err := gameState.CommandMove(words)
 			if err != nil {
 				log.Printf("error moving units: %s\n", err)
 			}
-			fmt.Println("Move successful!")
+			err = pubsub.PublishJSON(channel, routing.ExchangePerilTopic, fmt.Sprintf("%s.%s", routing.ArmyMovesPrefix, user), mv)
+			if err != nil {
+				log.Println("error publishing move: ", err)
+			}
+			log.Printf("move published successfully")
 			continue
 		}
 		if words[0] == "status" {
