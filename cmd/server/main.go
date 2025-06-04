@@ -31,13 +31,16 @@ func main() {
 	}
 	defer channel.Close()
 
-	_, _, err = pubsub.DeclareAndBind(conn, routing.ExchangePerilTopic, routing.GameLogSlug, fmt.Sprintf("%s.*", routing.GameLogSlug), pubsub.Durable)
+	err = pubsub.SubscribeGob(conn, routing.ExchangePerilTopic, routing.GameLogSlug, routing.GameLogSlug+".*", pubsub.Durable, handlerGameLogs())
 	if err != nil {
-		log.Fatalf("error binding queue: %s", err)
+		log.Fatalf("error subscribing to game logs queue: %s", err)
 	}
 
 	for {
 		input := gamelogic.GetInput()
+		if len(input) < 1 {
+			continue
+		}
 		if input[0] == "pause" {
 			fmt.Println("Pausing game...")
 			pubsub.PublishJSON(channel, routing.ExchangePerilDirect, routing.PauseKey, routing.PlayingState{

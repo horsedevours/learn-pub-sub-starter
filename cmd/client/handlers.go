@@ -3,11 +3,17 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+const (
+	winnerLoser = "%s won a war against %s"
+	draw        = "A war between %s and %s resulted in a draw"
 )
 
 func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) pubsub.AckType {
@@ -41,12 +47,28 @@ func handlerArmyMove(channel *amqp.Channel, gs *gamelogic.GameState) func(gamelo
 	}
 }
 
-func handlerWarMoves(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
+func handlerWarMoves(channel *amqp.Channel, gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.AckType {
 	return func(rw gamelogic.RecognitionOfWar) pubsub.AckType {
 		defer fmt.Print("> ")
-		outcome, _, _ := gs.HandleWar(rw)
+		outcome, winner, loser := gs.HandleWar(rw)
 		switch outcome {
-		case gamelogic.WarOutcomeOpponentWon, gamelogic.WarOutcomeYouWon, gamelogic.WarOutcomeDraw:
+		case gamelogic.WarOutcomeOpponentWon:
+			err := publishWarLog(channel, gs.GetUsername(), fmt.Sprintf(winnerLoser, winner, loser))
+			if err != nil {
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
+		case gamelogic.WarOutcomeYouWon:
+			err := publishWarLog(channel, gs.GetUsername(), fmt.Sprintf(winnerLoser, winner, loser))
+			if err != nil {
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
+		case gamelogic.WarOutcomeDraw:
+			err := publishWarLog(channel, gs.GetUsername(), fmt.Sprintf(draw, winner, loser))
+			if err != nil {
+				return pubsub.NackRequeue
+			}
 			return pubsub.Ack
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
@@ -57,4 +79,16 @@ func handlerWarMoves(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) p
 			return pubsub.NackDiscard
 		}
 	}
+}
+
+func publishWarLog(channel *amqp.Channel, username, message string) error {
+	err := pubsub.PublishGob(channel, routing.ExchangePerilTopic, routing.GameLogSlug+"."+username, routing.GameLog{
+		CurrentTime: time.Now(),
+		Message:     message,
+		Username:    username,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
 }

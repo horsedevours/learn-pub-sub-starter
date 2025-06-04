@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -46,7 +48,7 @@ func main() {
 	}
 
 	err = pubsub.SubscribeJSON(conn, routing.ExchangePerilTopic, routing.WarRecognitionsPrefix, fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix),
-		pubsub.Durable, handlerWarMoves(gameState))
+		pubsub.Durable, handlerWarMoves(channel, gameState))
 	if err != nil {
 		log.Fatalln("error subscribing to army moves handler: ", err)
 	}
@@ -82,7 +84,25 @@ func main() {
 			continue
 		}
 		if words[0] == "spam" {
-			fmt.Println("Spamming not allowed yet!")
+			if len(words) < 2 {
+				log.Println("You forgot to tell me how much spam!")
+				continue
+			}
+			count, err := strconv.Atoi(words[1])
+			if err != nil {
+				log.Println("error converting argument: ", err)
+				continue
+			}
+			for i := range count {
+				err = pubsub.PublishGob(channel, routing.ExchangePerilTopic, routing.GameLogSlug+"."+user, routing.GameLog{
+					CurrentTime: time.Now(),
+					Message:     gamelogic.GetMaliciousLog(),
+					Username:    user,
+				})
+				if err != nil {
+					log.Println("error publishing spam #", i)
+				}
+			}
 			continue
 		}
 		if words[0] == "quit" {
